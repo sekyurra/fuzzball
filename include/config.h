@@ -19,7 +19,7 @@
 /**
  * Server version number
  */
-#define VERSION "fb7.0"
+#define VERSION "fb7.0@SPR"
 
 /************************************************************************
    Administrative Options
@@ -101,8 +101,8 @@
 #define SIGEMERG
 
 /* Exit codes for specific situations */
-#define RESTART_EXIT_CODE	0           /**< Clean restart */
-#define ARMAGEDDON_EXIT_CODE	1       /**< Emergency abort */
+#define RESTART_EXIT_CODE 1     /**< Clean restart */
+#define ARMAGEDDON_EXIT_CODE 2  /**< Emergency abort */
 
 /* Defines for regex prims */
 #define MUF_RE_CACHE_ITEMS 64   /**< size of the regex cache */
@@ -186,10 +186,10 @@
 #define MCPGUI_SUPPORT
 
 /* Turn this on when you want MUD to set from root to some user_id */
-/* #define MUD_ID "MUCK" */
+#define MUD_ID "fuzzball"
 
 /* Turn this on when you want MUCK to set to a specific group ID... */
-/* #define MUD_GID "MUCK" */
+#define MUD_GID "fuzzball"
 
 /************************************************************************/
 /************************************************************************/
