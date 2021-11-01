@@ -71,7 +71,8 @@ $endif
 $iflib $lib/alias
     me @ swap alias-expand  ( Honor aliases issue417 Natasha@HLM 9 January 2003 )
 $else
-    pmatch dup ok? if 1 array_make else pop 0 array_make then
+    .noisy_pmatch
+    dup ok? if 1 array_make else pop "exit" abort then
 $endif
 ;
 : do-watchfor pop me @ prop_wflist array_get_reflist ;
