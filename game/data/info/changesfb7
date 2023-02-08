@@ -1,0 +1,180 @@
+New command                   Description
+--------------------------------------------------------------------------------------------------------------------
+@linklock                     Prevents players from linking to the object, if not passed
+@ownlock                      Enables bypassing controller permissions for the object
+@readlock                     Enables bypassing of non-MUF read permissions for the object
+@reconfiguressl (W-only)      Attempts to reread SSL certificate files and reset SSL options from @tune settings
+@register                     Manages object registrations
+help (connect screen)         Outputs the file specified by @tune file_connection_help
+uptime                        Displays the amount of time the server has been running
+
+Changed command               Description
+--------------------------------------------------------------------------------------------------------------------
+@clone                        Can now match by regname
+@credits                      Now outputs the file specified by @tune file_credits
+@examine                      Can now match by dbref
+@find                         No longer lists garbage objects
+@list                         Now includes options to control line number display
+@mcpprogram                   Can now match by regname
+@program                      Can now match by regname
+@toad                         Now removes all flags from the victim and assigns their macros to the recipient
+@tune                         Can now reset sysparms to default, show descriptions, and match by regname
+@version                      Now includes a second line listing compile-time options
+
+New MPI function              Description
+--------------------------------------------------------------------------------------------------------------------
+{descr}                       Returns the descriptor number that invoked the MPI
+{sysparm}                     Returns the value of the given system parameter for authorized players
+{tab}                         Returns a tab character, regardless of @tune tab_input_replaced_with_space
+
+Changed MPI function          Description
+--------------------------------------------------------------------------------------------------------------------
+{date}                        Now aborts when the date value cannot be determined
+{ltimestr}                    Can now approximate years and months
+{testlock}                    Now requires its "who" value to be a player or a thing
+{time}                        Now aborts when the time value cannot be determined
+
+New MUF defines / aliases     Description
+--------------------------------------------------------------------------------------------------------------------
+^                             Alias for BITXOR
+&                             Alias for BITAND
+**                            Alias for POW
+|                             Alias for BITOR
+<<                            Alias for BITSHIFT
+CASE                          Define for: BEGIN DUP
+DBCMP                         Define for: =
+DEFAULT                       Define for: POP 1 IF
+END                           Define for: BREAK THEN DUP
+ENDCASE                       Define for: POP POP 1 UNTIL
+NAME-OK?                      Define for: "exit" EXT-NAME-OK?
+PNAME-OK?                     Define for: "player" EXT-NAME-OK?
+SETOECHO                      Define for: "_/oecho" SWAP SETPROP
+SETPECHO                      Define for: "_/pecho" SWAP SETPROP
+WHEN                          Define for: IF POP
+
+New MUF directives and tokens Description
+--------------------------------------------------------------------------------------------------------------------
+$DOCCMD                       Populates the "_docs" property of the program
+__PROG__                      Replaced by the dbref of the program in $DOCCMD and $PUBDEF directives
+
+New MUF primitives            Signature          Description
+--------------------------------------------------------------------------------------------------------------------
+!=                            ( ? ? -- b )       Determines if two stack items are not equal
+?DUP                          ( x -- x x | x )   Duplicates the top stack item if it does not resolve to false
+-ROT                          ( x y z -- z x y ) Rotates the top three stack items, in reverse
+ARRAY_DEFAULT_PINNING         ( b -- )           Sets whether future arrays created in this process will be pinned
+ARRAY_FILTER_LOCK             ( a l -- a' )      Removes dbrefs from array that do not pass the given lock
+ARRAY_NOTIFY_SECURE           ( a1 a2 a3 -- )    For dbrefs in a3, notify a2/a1 for secure/nonsecure descriptors
+ARRAY_PIN                     ( a -- a' )        Pins the given array
+ARRAY_UNPIN                   ( a -- a' )        Unpins the given array
+CMD                           ( -- s )           Returns the command the user invoked the program with
+DEEP_COPY                     ( x -- x x )       Duplicates the top stack item, deep copying arrays
+DUMP                          ( -- b )           Requests a database dump and generates an event if successful
+ENTRANCES_ARRAY               ( d -- a )         Returns a list array that contains objects linked to d
+FORCEDBY                      ( -- d )           Returns the dbref of the most recent object forcing the code to run
+FORCEDBY_ARRAY                ( -- a )           Returns an array of all objects forcing this code to run
+FULLDEPTH                     ( -- i )           Returns the number of items currently on the stack
+MD5HASH                       ( s -- s' )        Calculates the MD5 hash of the given string
+NIP                           ( x y -- y )       Pops the second item off the stack
+TUCK                          ( x y -- y x y )   Duplicates y and places it under x
+NOTIFY_NOLISTEN               ( d s -- )         Tells player a message without triggering listener queues
+NOTIFY_SECURE                 ( d s s -- )       Notifies separate strings for secure and nonsecure descriptors
+PARSEMPI                      ( d s s i -- s )   Returns the output of the MPI parser with the given parameters
+PARSEMPIBLESSED               ( d s s i -- s )   Returns the output of blessed execution of the MPI parser
+PNAME_HISTORY                 ( d -- a )         Returns a dictionary representing the history of d's name changes
+POSE-SEPARATOR?               ( s -- b )         Determines if the string could be used as a pose without a space
+PROP-NAME-OK?                 ( s -- b )         Determines if the string is an acceptable property name
+READ_WANTS_NO_BLANKS          ( -- )             Turns off READ_WANTS_BLANKS setting
+REGSPLIT                      ( s s i -- a )     Splits the text by the given regular expression
+REGSPLIT_NOEMPTY              ( s s i -- a )     Splits the text by the given regex, with no empty pieces returned
+SECURE_SYSVARS                ( -- )             Resets the variables "me", "loc", "trigger", and "command"
+SHALLOW_COPY                  ( x -- x x )       Duplicates the top stack item, shallow copying arrays
+STATS_ARRAY                   ( d -- a )         Returns an array of the number of objects (by category) owned by d
+
+Changed MUF primitives        Description
+--------------------------------------------------------------------------------------------------------------------
+CHECKARGS                     Now recognizes dictionary (x) and array (Y/y) types
+DEPTH                         Now returns the number of unlocked items on the stack
+INTOSTR                       Now only works with integers, floats, dbrefs, and variables
+MLEVEL                        Now returns the program's effective MUCKER level if the argument is #-1
+SYSPARM_ARRAY                 Returned dictionary now includes "readmlev", "writemlev", "active" and "default" keys 
+TOADPLAYER                    Now exists regardless of compile-time options
+
+New @tune                     Description                                                 Default
+--------------------------------------------------------------------------------------------------------------------
+autolink_actions              Automatically link actions to NIL                           no
+consistent_lock_source        Maintain trigger as lock source in TESTLOCK                 yes
+cmd_only_overrides            Disable all built-in commands except wizard !overrides      no
+description_default           Default description                                         "You see nothing special."
+file_connection_help          'help' before login                                         "data/connect-help.txt"
+file_credits                  Acknowledgements                                            "data/credits.txt"
+file_editor_help              Editor help                                                 "data/edit-help.txt"
+file_help                     'help' main content                                         "data/help.txt"
+file_help_dir                 'help' topic directory                                      "data/help"
+file_info_dir                 'info' topic directory                                      "data/info/"
+file_log_cmd_times            Command times                                               "logs/cmd-times"
+file_log_commands             Player commands                                             "logs/commands"
+file_log_gripes               Player gripes                                               "logs/gripes"
+file_log_malloc               Memory allocations                                          "logs/malloc"
+file_log_muf_errors           MUF compile errors and warnings                             "logs/muf-errors"
+file_log_programs             Text of changed programs                                    "logs/programs"
+file_log_sanfix               Database fixes                                              "logs/sanfix"
+file_log_sanity               Database corruption and errors                              "logs/sanity"
+file_log_status               System errors and stats                                     "logs/status"
+file_log_stderr               Server error redirect                                       "logs/fbmuck.err"
+file_log_stdout               Server output redirect                                      "logs/fbmuck"
+file_log_user                 MUF-writable messages                                       "logs/user"
+file_man                      'man' main content                                          "data/man.txt"
+file_man_dir                  'man' topic directory                                       "data/man"
+file_motd                     Message of the day                                          "data/motd.txt"
+file_mpihelp                  'mpi' main content                                          "data/mpihelp.txt"
+file_mpihelp_dir              'mpi' topic directory                                       "data/mpihelp"
+file_news                     'news' main content                                         "data/news.txt"
+file_news_dir                 'news' topic directory                                      "data/news"
+file_welcome_screen           Opening screen                                              "data/welcome.txt"
+gender_prop                   Property name used for pronoun substitutions                "sex"
+lost_and_found                Place for things without a home                             #0
+mpi_continue_after_logout     Continue executing MPI after logout                         no
+new_program_flags             Initial flags for newly created programs                    ""
+player_name_limit             Limit on player name length                                 16
+pname_history_reporting       Report player name change history                           yes
+pname_history_threshold       Length of player name change history                        30d
+quiet_moves                   Suppress basic arrive and depart notifications              no
+server_cipher_preference      Honor server cipher preference order over client's          yes
+ssl_auto_reload_certs         Automatically reload certs if the cert file changes         no
+ssl_cert_file                 Path to SSL certificate .pem                                "data/server.pem"
+ssl_cipher_preference_list    Allowed OpenSSL cipher list                                 ( see tunelist.h )
+ssl_key_file                  Path to private key .pem                                    "data/server.pem"
+ssl_min_protocol_version      Min. allowed SSL protocol version for clients               "None"
+tab_input_replaced_with_space Change tab to space when processing input                   yes
+toad_default_recipient        Default owner for @toaded player's things                   #1
+toad_recycle                  Recycle newly-created toads                                 no
+verbose_examine               Show more information when using examine command            yes
+
+New server options            Description
+--------------------------------------------------------------------------------------------------------------------
+fbmuck -bindv4 [address]      Sets the listening address for IPv4 sockets
+fbmuck -bindv6 [address]      Sets the listening address for IPv6 sockets
+fbmuck -console               Treats stdin/stdout as a connection to the server
+fbmuck -nodetach              Does not detach the server process
+fbmuck -resolver [path]       Sets the location of the resolver program
+
+Additional Notes
+- The GUEST flag signifies a player is a guest, or the room/vehicle does not accept guests.
+- A "welcome" proplist on #0 now overrides the file specified by @tune file_welcome_screen.
+- Actions can now be linked to NIL, as a do-nothing destination.
+- Passwords are masked out in logs for server commands @newpassword, @password, and @pcreate.
+- The "starterdb" database is provided. Very similar to previous database iterations, but upgraded for FB7.
+- Objects can now be removed from the database if they are specified by a @tune.
+- MUF arrays can be "pinned", meaning changes to any copy will make changed to all copies.
+- Non-wizards can no longer use a restricted property in a lock.
+- Several wizard-level database-modifying commands can no longer be forced.
+
+Removed
+- Support for databases earlier than Foxen8. An upgrade path for FB5 (without FB6 conversion) is being developed.
+- Tools fb-announce, fb-olddecompress, fb-topwords, and optimdb.
+- OUTPUTPREFIX and OUTPUTSUFFIX interface commands.
+- Delta dumps, including associated server commands and @tunes.
+- Partially-implemented proplist format @tunes.
+- rob and kill commands, including associated @tunes. MUF equivalents are available in the fuzzball-muf archive.
+- @tune enable_match_yield. OVERT and YIELD flags are now always available.

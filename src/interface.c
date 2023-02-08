@@ -90,11 +90,6 @@ static int resolver_sock[2];
 struct descriptor_data *descriptor_list = NULL;
 
 /**
- * @var Tail of the list of descriptors being managed for reverse iteration.
- */
-struct descriptor_data *descriptor_list_tail = NULL;
-
-/**
  * @var a cache of the max connected, logged in, players.
  *      This was, apparently, one of Cynbe's good ideas.
  *      This is also stored in the SYS_MAX_CONNECTS_PROP on #0
@@ -1375,6 +1370,103 @@ forget_player_descr(dbref player, int descr)
     PLAYER_SET_DESCRS(player, arr);
 }
 
+/***** O(1) Connection Optimizations *****/
+
+/**
+ * @private
+ * @var mapping of "connection numbers" to descriptors
+ *
+ *      This, on the surface, looks a lot like descr_lookup_table, but it
+ *      is slightly different.  This is a linear array of descriptors that
+ *      are in no particular order.  Meaning, slots in this table are re-used
+ *      over time, so the index in this table has no correspondence to
+ *      descriptor numbers.  This is for what the MUCK calls "connection
+ *      numbers" in one of the more confusing bits of MUCKery.
+ *
+ *      Really, why do we have descriptors and connection numbers?  Getting
+ *      rid of this would complicated MUFs that rely on DESCRCON/CONDESCR,
+ *      so I am not suggesting we get rid of it ... but I do think it is
+ *      something stupid that we are now married to.
+ *
+ * @TODO Actually, now that I think about it, would there be any drawback
+ *       to making descriptors and connection numbers synonomymous?
+ *       'descrcon' and 'condescr' prims would then just become no-ops.
+ *       Anything that uses connections could use descriptors instead.
+ *       There must be some reason for this connection vs. descriptor thing
+ *       that I don't get.
+ *
+ * @TODO Make this table more dynamic -- if you make descr_lookup_table more
+ *       dynamic to support poll, then this needs to change and grow/shrink
+ *       dynamically as well.  Or if you follow the first todo, then this goes
+ *       away entirely.
+ */
+static struct descriptor_data *descr_count_table[FD_SETSIZE];
+
+/**
+ * @private
+ * @var the current descriptor count - which would be the size of the
+ *      descr_count_table
+ */
+static int current_descr_count = 0;
+
+/**
+ * Initialize the descriptor count lookup table to all NULLs
+ *
+ * @private
+ */
+static void
+init_descr_count_lookup()
+{
+    for (int i = 0; i < FD_SETSIZE; i++) {
+        descr_count_table[i] = NULL;
+    }
+}
+
+/**
+ * Compact the descriptor count table, removing all disconnected descriptors
+ *
+ * Note that old entries are not NULLed out, so one must always check
+ * current_descr_count and make sure not to overrun it, as you will
+ * probably segfault.  You cannot iterate over descr_count_table until you
+ * find a NULL entry.
+ *
+ * @private
+ */
+static void
+update_desc_count_table()
+{
+    int c = 0;
+
+    current_descr_count = 0;
+
+    for (struct descriptor_data *d = descriptor_list; d; d = d->next) {
+        if (d->connected) {
+            d->con_number = c + 1;
+            descr_count_table[c++] = d;
+            current_descr_count++;
+        }
+    }
+}
+
+/**
+ * Get a descriptor data structure from its connection count number
+ *
+ * @private
+ * @param c the connection count number
+ * @return the descriptor data structure
+ */
+static struct descriptor_data *
+descrdata_by_count(int c)
+{
+    c--;
+
+    if (c >= current_descr_count || c < 0) {
+        return NULL;
+    }
+
+    return descr_count_table[c];
+}
+
 #ifdef WIN32
 /**
  * @var Windows doesn't handle descriptors the same way that UNIX does,
@@ -1722,6 +1814,7 @@ check_connect(struct descriptor_data *d, const char *msg)
                 d->connected = 1;
                 d->connected_at = time(NULL);
                 d->player = player;
+                update_desc_count_table();
                 remember_player_descr(player, d->descriptor);
 
                 /* cks: someone has to initialize this somewhere. */
@@ -1769,6 +1862,7 @@ check_connect(struct descriptor_data *d, const char *msg)
                     d->connected = 1;
                     d->connected_at = time(NULL);
                     d->player = player;
+                    update_desc_count_table();
                     remember_player_descr(player, d->descriptor);
 
                     /* cks: someone has to initialize this somewhere. */
@@ -2373,6 +2467,7 @@ announce_disconnect(struct descriptor_data *d)
     d->player = NOTHING;
 
     forget_player_descr(player, d->descriptor);
+    update_desc_count_table();
 
     /*
      * Queue up all _disconnect programs referred to by properties
@@ -2430,22 +2525,12 @@ shutdownsock(struct descriptor_data *d)
         shutdown(d->descriptor, 2);
         close(d->descriptor);
     }
-
     forget_descriptor(d);
     freeqs(d);
-
-    if (d->prev)
-        d->prev->next = d->next;
-    else
-        descriptor_list = d->next;
+    *d->prev = d->next;
 
     if (d->next)
         d->next->prev = d->prev;
-
-    if (!descriptor_list)
-        descriptor_list_tail = NULL;
-    else if(descriptor_list_tail == d)
-        descriptor_list_tail = d->prev;
 
     free((void *) d->hostname);
     free((void *) d->username);
@@ -2614,13 +2699,10 @@ initializesock(int s, int output_s, const char *hostname, int is_ssl, int is_con
     d->username = alloc_string(ptr);
 
     if (descriptor_list)
-        descriptor_list->prev = d;
-    else
-        descriptor_list_tail = d;
+        descriptor_list->prev = &d->next;
 
     d->next = descriptor_list;
-    d->prev = NULL;
-
+    d->prev = &descriptor_list;
     descriptor_list = d;
     remember_descriptor(d);
 
@@ -5349,11 +5431,10 @@ close_sockets(const char *msg)
             SSL_free(d->ssl_session);
 #endif
 
-        /* I don't think this is really necessary, but the code was doing
-         * it before the linked list refactor so I'll keep it.
-         */
+        *d->prev = d->next;
+
         if (d->next)
-            d->next->prev = NULL;
+            d->next->prev = d->prev;
 
         free((void *) d->hostname);
         free((void *) d->username);
@@ -5364,7 +5445,7 @@ close_sockets(const char *msg)
         ndescriptors--;
     }
 
-    descriptor_list = descriptor_list_tail = NULL;
+    update_desc_count_table();
 
     for (int i = 0; i < numsocks; i++) {
         close(sock[i]);
@@ -5612,9 +5693,39 @@ get_player_descrs(dbref player, int *count)
  * @return the current number of descriptors handled by the MUCK.
  */
 int
-pdescrcount(void)
+pcount(void)
 {
-    return ndescriptors;
+    return current_descr_count;
+}
+
+/**
+ * Get the idle time in seconds of a given connection count number.
+ *
+ * Returns -1 if 'c' doesn't match anything.
+ *
+ * @param c the connection number
+ * @return the idle time in seconds
+ */
+int
+pidle(int c)
+{
+    /*
+     * @TODO This is identical to pdescridle ... If we get rid of the
+     *       use of connection count numbers, we can get rid of ths call
+     *       or alias it to pdescridle.
+     */
+    struct descriptor_data *d;
+    time_t now;
+
+    d = descrdata_by_count(c);
+
+    (void) time(&now);
+
+    if (d) {
+        return (int)(now - d->last_time);
+    }
+
+    return -1;
 }
 
 /**
@@ -5643,6 +5754,33 @@ pdescridle(int c)
 }
 
 /**
+ * Get the player dbref for a given connection count number.
+ *
+ * Returns NOTHING if 'c' doesn't match.
+ *
+ * @param c the connection count number
+ * @return the associated player dbref.
+ */
+dbref
+pdbref(int c)
+{
+    /*
+     * @TODO This is identical to pdescrdbref ... If we get rid of the
+     *       use of connection count numbers, we can get rid of ths call
+     *       or alias it to pdescrdbref.
+     */
+    struct descriptor_data *d;
+
+    d = descrdata_by_count(c);
+
+    if (d) {
+        return (d->player);
+    }
+
+    return NOTHING;
+}
+
+/**
  * Get the player dbref for a given descriptor.
  *
  * Returns NOTHING if 'c' doesn't match.
@@ -5662,6 +5800,36 @@ pdescrdbref(int c)
     }
 
     return NOTHING;
+}
+
+/**
+ * Get the online time for a given connection number.
+ *
+ * Returns -1 if 'c' doesn't match a connection.
+ *
+ * @param c the connection number
+ * @return the time connected in seconds.
+ */
+int
+pontime(int c)
+{
+    /*
+     * @TODO This is identical to pdescrontime ... If we get rid of the
+     *       use of connection count numbers, we can get rid of ths call
+     *       or alias it to pdescrontime.
+     */
+    struct descriptor_data *d;
+    time_t now;
+
+    d = descrdata_by_count(c);
+
+    (void) time(&now);
+
+    if (d) {
+        return (int)(now - d->connected_at);
+    }
+
+    return -1;
 }
 
 /**
@@ -5690,6 +5858,33 @@ pdescrontime(int c)
 }
 
 /**
+ * Get the host information for a given connection number.
+ *
+ * Returns -1 if 'c' doesn't match a connection.
+ *
+ * @param c the connection number
+ * @return the host information (could be a name or an IP string)
+ */
+char *
+phost(int c)
+{
+    /*
+     * @TODO This is identical to pdescrhost ... If we get rid of the
+     *       use of connection count numbers, we can get rid of ths call
+     *       or alias it to pdescrhost.
+     */
+    struct descriptor_data *d;
+
+    d = descrdata_by_count(c);
+
+    if (d) {
+        return ((char *) d->hostname);
+    }
+
+    return NULL;
+}
+
+/**
  * Get the host information for a given descriptor.
  *
  * Returns -1 if 'c' doesn't match a descriptor.
@@ -5706,6 +5901,33 @@ pdescrhost(int c)
 
     if (d) {
         return ((char *) d->hostname);
+    }
+
+    return NULL;
+}
+
+/**
+ * Get the user information for a given connection number.
+ *
+ * Returns -1 if 'c' doesn't match a connection.
+ *
+ * @param c the connection number
+ * @return the user information
+ */
+char *
+puser(int c)
+{
+    /*
+     * @TODO This is identical to pdescruser ... If we get rid of the
+     *       use of connection count numbers, we can get rid of ths call
+     *       or alias it to pdescruser.
+     */
+    struct descriptor_data *d;
+
+    d = descrdata_by_count(c);
+
+    if (d) {
+        return ((char *) d->username);
     }
 
     return NULL;
@@ -5737,7 +5959,7 @@ pdescruser(int c)
  * Get the least idle descriptor for the given player dbref
  *
  * @param who the dbref of the player to find a descriptor for.
- * @return the least idle descriptor or -1 if not connected.
+ * @return the least idle descriptor or 0 if not connected.
  */
 int
 least_idle_player_descr(dbref who)
@@ -5760,17 +5982,17 @@ least_idle_player_descr(dbref who)
     }
 
     if (best_d) {
-        return best_d->descriptor;
+        return best_d->con_number;
     }
 
-    return -1;
+    return 0;
 }
 
 /**
  * Get the least most descriptor for the given player dbref
  *
  * @param who the dbref of the player to find a descriptor for.
- * @return the most idle descriptor or -1 if not connected.
+ * @return the most idle descriptor or 0 if not connected.
  */
 int
 most_idle_player_descr(dbref who)
@@ -5793,10 +6015,35 @@ most_idle_player_descr(dbref who)
     }
 
     if (best_d) {
-        return best_d->descriptor;
+        return best_d->con_number;
     }
 
-    return -1;
+    return 0;
+}
+
+/**
+ * Boot a given connection number.
+ *
+ * Does nothing if connection is not found.
+ *
+ * @param c the connection number
+ */
+void
+pboot(int c)
+{
+    /*
+     * @TODO This is identical to pdescrboot ... If we get rid of the
+     *       use of connection count numbers, we can get rid of ths call
+     *       or alias it to pdescrboot.
+     */
+    struct descriptor_data *d;
+
+    d = descrdata_by_count(c);
+
+    if (d) {
+        process_output(d);
+        d->booted = 1;
+    }
 }
 
 /**
@@ -5821,6 +6068,32 @@ pdescrboot(int c)
     }
 
     return 0;
+}
+
+/**
+ * Send a string to a given connection number.
+ *
+ * Does nothing if connection is not found.
+ *
+ * @param c the connection number
+ * @param outstr the string to send.
+ */
+void
+pnotify(int c, char *outstr)
+{
+    /*
+     * @TODO This is identical to pdescrnotify ... If we get rid of the
+     *       use of connection count numbers, we can get rid of ths call
+     *       or alias it to pdescrnotify.
+     */
+    struct descriptor_data *d;
+
+    d = descrdata_by_count(c);
+
+    if (d) {
+        queue_ansi(d, outstr);
+        queue_write(d, "\r\n", 2);
+    }
 }
 
 /**
@@ -5849,6 +6122,30 @@ pdescrnotify(int c, char *outstr)
 }
 
 /**
+ * Get the descriptor for a given connection number
+ *
+ * @param c the connection number
+ * @return the associated descriptor
+ */
+int
+pdescr(int c)
+{
+    /*
+     * @TODO In a world without connection numbers, this can just return
+     *       the descriptor or be replaced with a #define
+     */
+    struct descriptor_data *d;
+
+    d = descrdata_by_count(c);
+
+    if (d) {
+        return (d->descriptor);
+    }
+
+    return -1;
+}
+
+/**
  * Get the first descriptor currently connected (connection number 1)
  *
  * @return the first descriptor currently connected.
@@ -5856,31 +6153,39 @@ pdescrnotify(int c, char *outstr)
 int
 pfirstdescr(void)
 {
-    struct descriptor_data* d;
+    /*
+     * @TODO This is used by prim_firstdescr so this would need to be
+     *       reimplemented somehow.
+     */
+    struct descriptor_data *d;
 
-    for (d = descriptor_list_tail; d; d = d->prev) {
-        if (d->connected) {
-            return d->descriptor;
-        }
+    d = descrdata_by_count(1);
+
+    if (d) {
+        return d->descriptor;
     }
 
     return 0;
 }
 
 /**
- * Get the last descriptor currently connected and logged into the MUCK.
+ * Get the last descriptor currently connected (connection number 1)
  *
  * @return the last descriptor currently connected.
  */
 int
 plastdescr(void)
 {
-    struct descriptor_data* d;
+    /*
+     * @TODO This is used by prim_lastdescr so this would need to be
+     *       reimplemented somehow.
+     */
+    struct descriptor_data *d;
 
-    for (d = descriptor_list; d; d = d->next) {
-        if (d->connected) {
-            return d->descriptor;
-        }
+    d = descrdata_by_count(current_descr_count);
+
+    if (d) {
+        return d->descriptor;
     }
 
     return 0;
@@ -5900,7 +6205,7 @@ pnextdescr(int c)
     d = descrdata_by_descr(c);
 
     if (d) {
-        d = d->prev;
+        d = d->next;
     }
 
     /*
@@ -5908,13 +6213,33 @@ pnextdescr(int c)
      * those.
      */
     while (d && (!d->connected))
-        d = d->prev;
+        d = d->next;
 
     if (d) {
         return (d->descriptor);
     }
 
     return (0);
+}
+
+/**
+ * Get the connection number associated with the given descriptor
+ *
+ * @param c the descriptor
+ * @return the associated connection number
+ */
+int
+pdescrcon(int c)
+{
+    struct descriptor_data *d;
+
+    d = descrdata_by_descr(c);
+
+    if (d) {
+        return d->con_number;
+    } else {
+        return 0;
+    }
 }
 
 /**
@@ -5962,6 +6287,7 @@ pset_user(int c, dbref who)
         if (who != NOTHING) {
             d->player = who;
             d->connected = 1;
+            update_desc_count_table();
             remember_player_descr(who, d->descriptor);
             announce_connect(d->descriptor, who);
         }
@@ -6632,6 +6958,7 @@ main(int argc, char **argv)
 
     /* Initialize some lookup tables */
     init_descriptor_lookup();
+    init_descr_count_lookup();
 
     /* More global initalizations */
     nomore_options = 0;

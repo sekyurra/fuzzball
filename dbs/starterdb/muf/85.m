@@ -1,8 +1,37 @@
-$include $lib/timestr
+: stimestr (i -- s)
+    dup 86400 > if
+        86400 / intostr "d" strcat 
+    else dup 3600 > if
+            3600 / intostr "h" strcat
+        else dup 60 > if
+                60 / intostr "m" strcat
+            else
+                intostr "s" strcat
+            then
+        then
+    then
+    "    " swap strcat
+    dup strlen 4 - strcut swap pop
+;
+  
+: mtimestr (i -- s)
+    "" over 86400 > if
+        over 86400 / intostr "d " strcat strcat
+        swap 86400 % swap
+    then
+    over 3600 / intostr
+    "00" swap strcat
+    dup strlen 2 - strcut
+    swap pop strcat ":" strcat
+    swap 3600 % 60 / intostr
+    "00" swap strcat
+    dup strlen 2 - strcut
+    swap pop strcat
+;
  
 : collate-entry (i -- s)
-    dup descrdbref name
-    over descrtime mtimestr
+    dup condbref name
+    over contime mtimestr
     over strlen over strlen +
     dup 19 < if
         "                   " (19 spaces)
@@ -12,18 +41,20 @@ $include $lib/timestr
         strcut pop swap ""
     then
     swap strcat strcat
-    swap descridle stimestr strcat
+    swap conidle stimestr strcat
 ;
  
-: get-namelist  ( -- {s} )
-    0 #-1 firstdescr
-    begin dup while
+: get-namelist  ( -- {s})
+    0 concount
+    begin
+        dup 0 > while
         dup collate-entry
         rot 1 + rot
-        nextdescr
+        1 -
     repeat
     pop
 ;
+ 
 lvar col
 : show-namelist ({s} -- )
     begin
