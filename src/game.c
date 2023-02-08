@@ -673,7 +673,8 @@ process_command(int descr, dbref player, const char *command)
         else if (tp_cmd_only_overrides)
             goto bad;
 
-        full_command = strcpyn(xbuf, sizeof(xbuf), command);
+        strcpyn(xbuf, sizeof(xbuf), command);
+        full_command = xbuf;
 
         for (; *full_command && !isspace(*full_command); full_command++) ;
 
@@ -681,7 +682,8 @@ process_command(int descr, dbref player, const char *command)
             full_command++;
 
         /* find arg1 -- move over command word */
-        command = strcpyn(ybuf, sizeof(ybuf), command);
+        strcpyn(ybuf, sizeof(ybuf), command);
+        command = ybuf;
 
         for (arg1 = (char *)command; *arg1 && !isspace(*arg1); arg1++) ;
 
@@ -820,6 +822,13 @@ process_command(int descr, dbref player, const char *command)
 
                             case 'o':
                             case 'O':
+                                /*
+                                 * Make sure we don't skip over the null
+                                 * terminator.
+                                 */
+                                if (command[3] != 'n')
+                                    goto bad;
+
                                 switch (command[4]) {
                                     case 'l':
                                     case 'L':
@@ -1287,6 +1296,10 @@ process_command(int descr, dbref player, const char *command)
 
                     case 'r':
                     case 'R':
+                        /* Make sure we don't skip over the null terminator. */
+                        if (command[2] != 'e')
+                            goto bad;
+
                         /*
                          * @readlock, @recycle, @reconfiguressl, @register,
                          * @relink, @restart, @restrict

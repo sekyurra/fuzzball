@@ -674,6 +674,8 @@ queue_ansi(struct descriptor_data *d, const char *msg)
         } else {
             strip_ansi(buf, msg);
         }
+    } else if (tp_do_mpi_parsing && tp_do_welcome_parsing) {
+        strip_bad_ansi(buf, msg);
     } else {
         strip_ansi(buf, msg);
     }
@@ -1176,58 +1178,97 @@ static void
 welcome_user(struct descriptor_data *d)
 {
     FILE *f;
-    char *ptr;
     char buf[BUFFER_LEN];
-
-    int welcome_proplist = 0;
-
+    *buf = '\0';
     /*
-     * @TODO This is kind of a weird way to read a list.  If I were doing
-     *       it, I would iterate over the value of WELCOME_PROPLIST#
-     *       which is the number of lines rather than ... just iterate
-     *       til props stop loading.  I think that is more technically
-     *       correct / expected.  If you do it this way, 'welcome_proplist'
-     *       can become the integer value of WELCOME_PROPLIST's length
-     *       prop instead of a boolean set every iteration of the loop.
+     * This is less efficient than reading the list directly, since we have to
+     * go through MPI permissions checking, but since we're fetching it as God
+     * we skip all the locks.
+     *
+     * This also allows us to cleanly handle all the different list formats we
+     * might have to deal with.
      */
-    for (int i = 1; ; i++) {
-        const char *line;
-        snprintf(buf, sizeof(buf), "%s#/%d", WELCOME_PROPLIST, i);
-
-        if ((line = get_property_class(GLOBAL_ENVIRONMENT, buf))) {
-            welcome_proplist = 1;
-            queue_ansi(d, line);
-            queue_write(d, "\r\n", 2);
+    int blessed = 1;
+    if (!get_concat_list(GOD, GOD, GLOBAL_ENVIRONMENT, WELCOME_PROPLIST,
+                         buf, sizeof(buf), 0, MPI_ISPRIVATE | MPI_ISBLESSED,
+                         &blessed))
+    {
+        /* Failed list read, fall back to file. */
+        if ((f = fopen(tp_file_welcome_screen, "rb")) == NULL) {
+            perror("spit_file: welcome.txt");
         } else {
-            break;
+            /*
+             * No major error handling here. If fread() fails then
+             * the buffer stays empty, and we end up falling back
+             * to DEFAULT_WELCOME_MESSAGE anyway.
+             */
+            size_t ct = fread(buf, sizeof(char), BUFFER_LEN - 1, f);
+            if (ct >= 0)
+                buf[ct] = '\0';
+            fclose(f);
         }
     }
 
-    if (!welcome_proplist) {
+    /*
+     * Try to parse MPI if we're allowed.
+     */
+    if (*buf && tp_do_mpi_parsing && tp_do_welcome_parsing) {
+        char tmp[BUFFER_LEN];
         /*
-         * @TODO Use show_file instead?
-         *       Could add a return value to show_file which returns
-         *       boolean if show_file was able to load, and show
-         *       the default message if it returns false.  Removes
-         *       duplicate code and makes this function more tidy.
+         * @TODO These are not the most helpful variables to shove
+         *       descr and host information into.
          */
+        snprintf(match_cmdname, sizeof(match_cmdname), "%d",
+                 d->descriptor);
+        snprintf(match_args, sizeof(match_args), "%s", d->hostname);
 
-        if ((f = fopen(tp_file_welcome_screen, "rb")) == NULL) {
-            queue_ansi(d, DEFAULT_WELCOME_MESSAGE);
-            perror("spit_file: welcome.txt");
+        do_parse_mesg(d->descriptor, tp_welcome_mpi_who,
+                      tp_welcome_mpi_what, buf, "welcome", tmp,
+                      sizeof(tmp), MPI_ISPRIVATE | MPI_ISBLESSED);
+
+        if (*tmp) {
+            strcpyn(buf, sizeof(buf), tmp);
         } else {
-            while (fgets(buf, sizeof(buf) - 3, f)) {
-                ptr = strchr(buf, '\n');
-                if (ptr && ptr > buf && *(ptr - 1) != '\r') {
-                    *ptr++ = '\r';
-                    *ptr++ = '\n';
-                    *ptr++ = '\0';
-                }
-                queue_ansi(d, buf);
-            }
-
-            fclose(f);
+            /*
+             * @TODO Since God is the effective user, he gets notified with any
+             *       error messages. Since we can't easily redirect MPI output
+             *       to a file instead of a player, this is the best we can do
+             *       for debugging the login screen.
+             */
+            *buf = '\0';
         }
+    }
+
+    /*
+     * If we found something to show, queue it.
+     * Otherwise, fall back to the default.
+     */
+    if (*buf) {
+        char *t = buf, *tstart = buf;
+        while (*t) {
+            if (*t == '\n') {
+                *t++ = '\0';
+                queue_ansi(d, tstart);
+                queue_write(d, "\r\n", 2);
+                tstart = t;
+            } else if (*t == '\r') {
+                *t++ = '\0';
+                if (*t == '\n') {
+                    ++t;
+                }
+                queue_ansi(d, tstart);
+                queue_write(d, "\r\n", 2);
+                tstart = t;
+            } else {
+                ++t;
+            }
+        }
+        if (*tstart) {
+            queue_ansi(d, tstart);
+            queue_write(d, "\r\n", 2);
+        }
+    } else {
+        queue_ansi(d, DEFAULT_WELCOME_MESSAGE);
     }
 
     if (wizonly_mode) {
@@ -2257,6 +2298,8 @@ queue_immediate_and_flush(struct descriptor_data *d, const char *msg)
         } else {
             strip_ansi(buf, msg);
         }
+    } else if (tp_do_mpi_parsing && tp_do_welcome_parsing) {
+        strip_bad_ansi(buf, msg);
     } else {
         strip_ansi(buf, msg);
     }
@@ -2788,7 +2831,7 @@ static const char *
 addrout_v6(in_port_t lport, struct in6_addr *a, in_port_t prt)
 {
     static char buf[128];
-    char ip6addr[128];
+    char ip6addr[INET6_ADDRSTRLEN];
 
     struct in6_addr addr;
     memcpy(&addr.s6_addr, a, sizeof(struct in6_addr));
@@ -2830,7 +2873,7 @@ addrout_v6(in_port_t lport, struct in6_addr *a, in_port_t prt)
     }
 #endif /* !SPAWN_HOST_RESOLVER */
 
-    inet_ntop(AF_INET6, a, ip6addr, 128);
+    inet_ntop(AF_INET6, a, ip6addr, sizeof(ip6addr));
 
 #ifdef SPAWN_HOST_RESOLVER
     snprintf(buf, sizeof(buf), "%s(%" PRIu16 ")%" PRIu16 "\n", ip6addr, prt,
@@ -2868,6 +2911,7 @@ new_connection_v6(in_port_t port, int sock_, int is_ssl)
     struct sockaddr_in6 addr;
     socklen_t addr_len;
     char hostname[128];
+    size_t hostlen;
 
     addr_len = (socklen_t) sizeof(addr);
     newsock = accept(sock_, (struct sockaddr *) &addr, &addr_len);
@@ -2878,7 +2922,25 @@ new_connection_v6(in_port_t port, int sock_, int is_ssl)
 #ifdef F_SETFD
         fcntl(newsock, F_SETFD, FD_CLOEXEC);
 #endif
-        strcpyn(hostname, sizeof(hostname), addrout_v6(port, &(addr.sin6_addr), addr.sin6_port));
+        hostlen = strcpyn(hostname, sizeof(hostname),
+                          addrout_v6(port, &(addr.sin6_addr), addr.sin6_port));
+
+        /*
+         * IPv6 hostnames sometimes have newlines as a terminator it seems.
+         * This makes sure that:
+         *
+         * a) there's no newline or \r at the end of the hostname
+         * b) the hostname is long enough for this comparison to not crash
+         *    something.
+         *
+         * Reported by PR #670 in Github
+         */
+        if ((hostlen > 2) && (hostname[hostlen-2] == '\r')) {
+            hostname[hostlen-2] = 0;
+        } else if ((hostlen > 1) && (hostname[hostlen-1] == '\n')) {
+            hostname[hostlen-1] = 0;
+        }
+
         log_status("ACCEPT: %s on descriptor %d", hostname, newsock);
         log_status("CONCOUNT: There are now %d open connections.", ++ndescriptors);
         return initializesock(newsock, newsock, hostname, is_ssl, 0);

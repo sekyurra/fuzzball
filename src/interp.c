@@ -1433,8 +1433,9 @@ interp_err(dbref player, dbref program, struct inst *pc,
                          NAME(OWNER(origprog)));
     }
 
-    notifyf_nolisten(player, "\033[1m%s(#%d), line %d; %s: %s\033[0m",
+    snprintf(buf, sizeof(buf), "\033[1m%s(#%d), line %d; %s: %s\033[0m",
                      NAME(program), program, pc ? pc->line : -1, msg1, msg2);
+    notify_nolisten(player, buf, 1);
 
     lt = time(NULL);
     strftime(tbuf, 32, "%c", localtime(&lt));
@@ -2425,7 +2426,7 @@ interp_loop(dbref player, dbref program, struct frame *fr, int rettyp)
                             size_t k, outcount;
                             size_t count =
                                 (size_t)array_count(temp1->data.array);
-                            char **events = malloc(count * sizeof(char **));
+                            const char **events = malloc(count * sizeof(char **));
 
                             for (outcount = k = 0; k < count; k++) {
                                 const char *val =
